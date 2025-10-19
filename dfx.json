@@ -5,7 +5,7 @@
       "package": "q3x_backend",
       "type": "rust"
     },
-	"icp_ledger_canister": {
+    "icp_ledger_canister": {
       "type": "custom",
       "candid": "https://github.com/dfinity/ic/releases/download/ledger-suite-icp-2025-07-04/ledger.did",
       "wasm": "https://github.com/dfinity/ic/releases/download/ledger-suite-icp-2025-07-04/ledger-canister_notify-method.wasm.gz",
@@ -14,9 +14,34 @@
           "ic": "ryjl3-tyaaa-aaaaa-aaaba-cai"
         }
       },
-      "specified_id": "ryjl3-tyaaa-aaaaa-aaaba-cai"
-	}
+      "specified_id": "ryjl3-tyaaa-aaaaa-aaaba-cai",
+      "init_arg": "(variant { Init = record { minting_account = \"1dae76dfc7b6ad4de27b63b6b0897bea32211e85ec8f4cca11bc103703f43903\"; initial_values = vec { record { \"e0b19e207c001717ba3c8caaa181aef10cfc4fd484d06452e3c817af16e41ada\"; record { e8s = 10_000_000_000 : nat64; }; }; }; send_whitelist = vec {}; transfer_fee = opt record { e8s = 10_000 : nat64; }; token_symbol = opt \"LICP\"; token_name = opt \"Local ICP\"; } })"
+    },
+    "internet_identity": {
+      "type": "custom",
+      "candid": "https://github.com/dfinity/internet-identity/releases/latest/download/internet_identity.did",
+      "wasm": "https://github.com/dfinity/internet-identity/releases/latest/download/internet_identity_dev.wasm.gz",
+      "remote": {
+        "id": {
+          "ic": "rdmx6-jaaaa-aaaaa-aaadq-cai"
+        }
+      },
+      "specified_id": "rdmx6-jaaaa-aaaaa-aaadq-cai"
+    },
+    "evm_rpc": {
+      "type": "custom",
+      "candid": "https://github.com/internet-computer-protocol/evm-rpc-canister/releases/latest/download/evm_rpc.did",
+      "wasm": "https://github.com/internet-computer-protocol/evm-rpc-canister/releases/latest/download/evm_rpc.wasm.gz",
+      "remote": {
+        "id": {
+          "ic": "7hfb6-caaaa-aaaar-qadga-cai"
+        }
+      },
+      "specified_id": "7hfb6-caaaa-aaaar-qadga-cai",
+      "init_arg": "(record {})"
+    }
   },
+
   "defaults": {
     "build": {
       "args": "",

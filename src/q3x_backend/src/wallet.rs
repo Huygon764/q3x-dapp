@@ -67,13 +67,6 @@ pub trait MultiSignatureWallet {
     /// Returns `Result<(), WalletError>` indicating success or the type of failure.
     fn set_default_threshold(&mut self, threshold: u8) -> Result<(), WalletError>;
 
-    /// Transfer tokens to a principal.
-    ///
-    /// * `args` - The `TransferArgs` struct containing the amount, to_principal, and to_subaccount.
-    ///
-    /// Returns `Result<BlockIndex, String>` indicating success or the type of failure.
-    async fn transfer(&self, args: TransferArgs) -> Result<BlockIndex, String>;
-
     /// Check if a given `Principal` is a signer in the wallet.
     ///
     /// * `wallet_id` - The ID of the wallet.
@@ -247,32 +240,6 @@ impl MultiSignatureWallet for Wallet {
         }
         self.threshold = threshold;
         Ok(())
-    }
-
-    // transfer icp token
-    async fn transfer(&self, args: TransferArgs) -> Result<BlockIndex, String> {
-        ic_cdk::println!(
-            "Transferring {} tokens to principal {} subaccount {:?}",
-            &args.amount,
-            &args.to_principal,
-            &args.to_subaccount
-        );
-        let to_subaccount = args.to_subaccount.unwrap_or(DEFAULT_SUBACCOUNT);
-        let transfer_args = ic_ledger_types::TransferArgs {
-            memo: Memo(0),
-            amount: args.amount,
-            fee: Tokens::from_e8s(10_000),
-            // The subaccount of the account identifier that will be used to withdraw tokens and send them
-            // to another account identifier. If set to None then the default subaccount will be used.
-            // See the [Ledger doc](https://internetcomputer.org/docs/current/developer-docs/integrations/ledger/#accounts).
-            from_subaccount: None,
-            to: AccountIdentifier::new(&args.to_principal, &to_subaccount),
-            created_at_time: None,
-        };
-        ic_ledger_types::transfer(MAINNET_LEDGER_CANISTER_ID, &transfer_args)
-            .await
-            .map_err(|e| format!("failed to call ledger: {e:?}"))?
-            .map_err(|e| format!("ledger transfer error {e:?}"))
     }
 
     async fn has_signer(&self, wallet_id: &str) -> bool {

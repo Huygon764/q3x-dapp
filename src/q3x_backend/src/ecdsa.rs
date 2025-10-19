@@ -1,11 +1,12 @@
 use candid::Principal;
-use ic_cdk::api::management_canister::ecdsa::{
+use ic_cdk::{api::{canister_self, management_canister::ecdsa::{
     EcdsaCurve, EcdsaKeyId, EcdsaPublicKeyArgument, EcdsaPublicKeyResponse, SignWithEcdsaArgument,
     SignWithEcdsaResponse,
-};
+}}, println};
 use libsecp256k1::{recover, Message, PublicKey, PublicKeyFormat, RecoveryId, Signature};
 
-const DEFAULT_ECDSA_SIGN_CYCLES: u64 = 10_000_000_000;
+// const DEFAULT_ECDSA_SIGN_CYCLES: u64 = 10_000_000_000;
+const DEFAULT_ECDSA_SIGN_CYCLES: u64 = 30_000_000_000;
 
 /// Get the EcdsaKeyId from the environment.
 ///
@@ -97,11 +98,12 @@ pub fn find_recovery_id(msg: &[u8], sig: &[u8], known_pub_key: [u8; 65]) -> Opti
 /// let public_key = get_public_key(wallet_id, key_id).await?;
 /// ```
 pub async fn get_public_key(wallet_id: String, key_id: EcdsaKeyId) -> Result<[u8; 65], String> {
-    let ic = Principal::management_canister();
+    let ic: Principal = Principal::management_canister();
+    let derivation_path = get_derivation_path(&wallet_id);
 
     let request = EcdsaPublicKeyArgument {
         canister_id: None,
-        derivation_path: vec![wallet_id.as_bytes().to_vec()],
+        derivation_path: vec![derivation_path.as_bytes().to_vec()],
         key_id,
     };
     let (res,): (EcdsaPublicKeyResponse,) = ic_cdk::call(ic, "ecdsa_public_key", (request,))
@@ -145,10 +147,11 @@ pub async fn sign_message(
     key_id: EcdsaKeyId,
 ) -> Result<Vec<u8>, String> {
     let ic = Principal::management_canister();
-    let derivation_path = vec![wallet_id.as_bytes().to_vec()];
+    let derivation_path = get_derivation_path(&wallet_id);
+    let derivation_path_vec = vec![derivation_path.as_bytes().to_vec()];
     let request = SignWithEcdsaArgument {
         message_hash: message_hash.clone(),
-        derivation_path: derivation_path.clone(),
+        derivation_path: derivation_path_vec.clone(),
         key_id: key_id.clone(),
     };
 
@@ -208,4 +211,9 @@ pub async fn is_signature_valid(
     let recovered_address = recover(&message_obj, &signature_obj, &recovery_obj).unwrap();
 
     Ok(recovered_address.serialize().to_vec() == pub_key)
+}
+
+pub fn get_derivation_path(wallet_id: &str) -> String {
+    let derivation_path = format!("{}:{}", canister_self(), wallet_id);
+    derivation_path
 }

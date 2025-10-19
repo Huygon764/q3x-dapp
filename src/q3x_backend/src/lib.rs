@@ -1,13 +1,18 @@
+mod batch;
+mod chain_fusion;
 mod ecdsa;
+mod evm_types;
 mod privacy;
 mod vetkey;
 mod wallet;
 
+use crate::batch::{execute_batch, propose_batch, transfer_icp, BatchTransaction};
 use crate::privacy::{
     decrypt_wallet_data, encrypt_message_with_vetkeys, encrypt_principals_with_vetkeys,
 };
 use crate::vetkey::set_vetkey_id;
 use crate::wallet::{MultiSignatureWallet, TransferArgs, Wallet, WalletError};
+use chain_fusion::*;
 use ic_cdk::api::management_canister::ecdsa::EcdsaKeyId;
 use ic_cdk::{init, query, update};
 use std::cell::RefCell;
@@ -167,6 +172,12 @@ async fn propose(wallet_id: String, msg: String) -> Result<(), String> {
         .with(|wallets| wallets.borrow().get(&wallet_id).cloned())
         .ok_or_else(|| WALLET_NOT_FOUND_ERROR.to_string())?;
 
+    ic_cdk::println!(
+        "Proposing message of length {} to wallet {}",
+        msg.len(),
+        wallet_id
+    );
+
     wallet
         .propose_message(msg, &wallet_id)
         .await
@@ -280,7 +291,32 @@ async fn sign(wallet_id: String, msg: String) -> Result<String, String> {
     if !can_sign {
         return Err(WALLET_CANNOT_SIGN_ERROR.to_string());
     }
+
+    // Try batch format first
+    // if let Ok(batch) = candid::decode_one::<BatchTransaction>(&msg) {
+    //     ic_cdk::println!("🎯 Processing batch transaction: {}", batch.id);
+
+    //     let batch_result = execute_batch(wallet_id.clone(), batch).await;
+
+    //     // Remove message from pending after execution
+    //     let mut wallet = WALLETS
+    //         .with(|wallets| wallets.borrow().get(&wallet_id).cloned())
+    //         .ok_or_else(|| WALLET_NOT_FOUND_ERROR.to_string())?;
+
+    //     let _ = wallet
+    //         .remove_message_and_metadata(msg.clone(), &wallet_id)
+    //         .await;
+
+    //     WALLETS.with(|wallets| {
+    //         wallets.borrow_mut().insert(wallet_id, wallet);
+    //     });
+
+    //     return batch_result;
+    // }
+
     let mut is_special_message = false;
+    let mut pending_batch: Option<BatchTransaction> = None;
+    let mut pending_evm_transfer: Option<(Wallet, TransferEvmArgs)> = None;
     let mut pending_transfer: Option<(Wallet, TransferArgs)> = None;
     let mut pending_add_signer: Option<Principal> = None;
     let mut pending_remove_signer: Option<Principal> = None;
@@ -332,6 +368,54 @@ async fn sign(wallet_id: String, msg: String) -> Result<String, String> {
                 };
                 pending_transfer = Some((wallet.clone(), transfer_args));
                 is_special_message = true;
+            } else if message_str.starts_with("TRANSFER_EVM::") {
+                ic_cdk::println!("🔍 Processing EVM transfer message");
+                let parts: Vec<&str> = message_str.split("::").collect();
+
+                if parts.len() != 6 {
+                    ic_cdk::println!("❌ Invalid EVM transfer message format");
+                } else {
+                    ic_cdk::println!("📋 EVM transfer parts: {:?}", parts);
+
+                    // Parse the parts
+                    let to = parts[1].to_string();
+                    let value = parts[2].parse::<u128>().unwrap_or(0);
+                    let chain_id = parts[3].parse::<u64>().unwrap_or(0);
+                    let gas_price = parts[4].parse::<u128>().unwrap_or(0);
+                    let gas_limit = parts[5].parse::<u64>().unwrap_or(0);
+
+                    let evm_transfer_args = TransferEvmArgs {
+                        wallet_id: wallet_id.clone(),
+                        to,
+                        value,
+                        chain_id,
+                        gas_price,
+                        gas_limit,
+                    };
+
+                    ic_cdk::println!("⚡ Parsed EVM args: {:?}", evm_transfer_args);
+                    pending_evm_transfer = Some((wallet.clone(), evm_transfer_args));
+                    is_special_message = true;
+                }
+            } else if message_str.starts_with("BATCH::") {
+                ic_cdk::println!("🔄 Processing batch transaction");
+
+                let parts: Vec<&str> = message_str.split("::").collect();
+                if parts.len() == 3 {
+                    let batch_id = parts[1];
+                    let encoded_data = parts[2];
+
+                    // Decode from hex
+                    if let Ok(candid_bytes) = hex::decode(encoded_data) {
+                        // Deserialize BatchTransaction
+                        if let Ok(batch) = candid::decode_one::<BatchTransaction>(&candid_bytes) {
+                            ic_cdk::println!("📋 Prepared batch for execution: {}", batch.id);
+                            // Store batch for execution outside closure
+                            pending_batch = Some(batch);
+                        }
+                    }
+                }
+                is_special_message = true;
             }
         });
     }
@@ -367,13 +451,43 @@ async fn sign(wallet_id: String, msg: String) -> Result<String, String> {
         }
     }
 
+    // Handle EVM transfer execution
+    if let Some((wallet_clone, evm_args)) = pending_evm_transfer {
+        ic_cdk::println!("🚀 Executing EVM transfer with multisig approval");
+
+        match chain_fusion::transfer_evm(evm_args, None).await {
+            Ok(tx_hash) => {
+                ic_cdk::println!("✅ EVM Transfer completed: {}", tx_hash);
+            }
+            Err(e) => {
+                ic_cdk::println!("❌ EVM Transfer failed: {}", e);
+                return Err(format!("EVM Transfer failed: {}", e));
+            }
+        }
+    }
+
     // handle for transfer
     if let Some((wallet_clone, args)) = pending_transfer {
-        wallet_clone
-            .transfer(args)
+        transfer_icp(args)
             .await
             .map_err(|e| format!("Transfer failed: {e}"))?;
     }
+
+    // batch process
+    if let Some(batch) = pending_batch {
+        ic_cdk::println!("🚀 Executing batch transaction: {}", batch.id);
+
+        match execute_batch(wallet_id.clone(), batch).await {
+            Ok(_) => {
+                ic_cdk::println!("✅ Batch executed successfully");
+            }
+            Err(e) => {
+                ic_cdk::println!("❌ Batch execution failed: {}", e);
+                return Err(format!("Batch execution failed: {}", e));
+            }
+        }
+    }
+
     let signature = match is_special_message {
         true => "".to_string(),
         false => hex::encode(sign_message(wallet_id.clone(), msg.clone(), key_id).await?),
@@ -627,6 +741,92 @@ async fn propose_with_metadata(
     propose(wallet_id.clone(), msg.clone()).await?;
     add_metadata(wallet_id, msg, metadata).await
 }
+
+#[update]
+pub async fn get_evm_address(wallet_id: String) -> Result<String, String> {
+    chain_fusion::get_evm_address(wallet_id).await
+}
+
+// #[update]
+// pub async fn transfer_evm(args: TransferEvmArgs) -> Result<String, String> {
+//     chain_fusion::transfer_evm(args).await
+// }
+
+#[update]
+async fn transfer_evm(args: TransferEvmArgs) -> Result<String, String> {
+    ic_cdk::println!("🚀 Creating EVM transfer proposal");
+    ic_cdk::println!("Wallet: {}", args.wallet_id);
+    ic_cdk::println!("To: {}", args.to);
+    ic_cdk::println!("Value: {} Wei", args.value);
+    ic_cdk::println!("Chain: {}", args.chain_id);
+    ic_cdk::println!("Gas Price: {} Wei", args.gas_price);
+    ic_cdk::println!("Gas Limit: {}", args.gas_limit);
+
+    // Validate inputs
+    if args.to.is_empty() || !args.to.starts_with("0x") || args.to.len() != 42 {
+        return Err("Invalid recipient address".to_string());
+    }
+
+    // Create special EVM message
+    let special_message = hex::encode(format!(
+        "TRANSFER_EVM::{}::{}::{}::{}::{}",
+        args.to, args.value, args.chain_id, args.gas_price, args.gas_limit
+    ));
+
+    ic_cdk::println!("📝 Special message: {}", special_message);
+
+    // Propose the message (same as ICP transfers)
+    let _ = propose(args.wallet_id, special_message.clone()).await?;
+
+    Ok(special_message)
+}
+
+#[update]
+pub async fn get_transaction_count(wallet_id: String, chain_id: u64) -> Result<u64, String> {
+    chain_fusion::get_transaction_count(wallet_id, chain_id).await
+}
+
+#[update]
+pub async fn get_icp_balance(wallet_id: String) -> Result<ICPBalance, String> {
+    chain_fusion::get_icp_balance(wallet_id).await
+}
+
+#[update]
+pub async fn get_wallet_portfolio(
+    wallet_id: String,
+    chain_id: u64,
+) -> Result<PortfolioBalance, String> {
+    chain_fusion::get_wallet_portfolio(wallet_id, chain_id).await
+}
+
+#[update]
+pub async fn propose_batch_transaction(
+    wallet_id: String,
+    batch: BatchTransaction,
+) -> Result<String, String> {
+    propose_batch(wallet_id, batch).await
+}
+// pub async fn propose_batch_transaction(
+//     wallet_id: String,
+//     batch: BatchTransaction,
+// ) -> Result<String, String> {
+//     // Serialize BatchTransaction to Candid bytes
+//     let candid_bytes =
+//         candid::encode_one(&batch).map_err(|e| format!("Failed to encode batch: {}", e))?;
+
+//     // Encode to hex for safe string transmission
+//     let encoded_batch = hex::encode(&candid_bytes);
+
+//     // Create special message pattern
+//     let special_message = hex::encode(format!("BATCH::{}::{}", batch.id, encoded_batch));
+
+//     ic_cdk::println!("📦 Creating batch proposal: {}", batch.id);
+
+//     // Propose
+//     let _ = propose(wallet_id, special_message.clone()).await?;
+
+//     Ok(special_message)
+// }
 
 fn debug_println_caller(method_name: &str) {
     ic_cdk::println!(

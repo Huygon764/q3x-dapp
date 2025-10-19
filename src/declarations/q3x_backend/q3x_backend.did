@@ -1,9 +1,62 @@
+type BatchTransaction = record {
+  id : text;
+  description : text;
+  created_at : nat64;
+  created_by : principal;
+  transactions : vec TransactionType;
+};
+type ICPBalance = record {
+  account_id : text;
+  balance_e8s : nat64;
+  balance_icp : text;
+};
+type PortfolioBalance = record {
+  native_symbol : text;
+  wallet_address : text;
+  chain_id : nat64;
+  token_balances : vec TokenBalance;
+  icp_balance : ICPBalance;
+  native_balance : text;
+};
 type Result = variant { Ok; Err : text };
 type Result_1 = variant { Ok : text; Err : text };
 type Result_2 = variant { Ok : nat8; Err : text };
-type Result_3 = variant { Ok : vec text; Err : text };
-type Result_4 = variant { Ok : vec record { text; vec text }; Err : text };
-type Result_5 = variant { Ok : bool; Err : text };
+type Result_3 = variant { Ok : ICPBalance; Err : text };
+type Result_4 = variant { Ok : vec text; Err : text };
+type Result_5 = variant { Ok : vec record { text; vec text }; Err : text };
+type Result_6 = variant { Ok : nat64; Err : text };
+type Result_7 = variant { Ok : PortfolioBalance; Err : text };
+type Result_8 = variant { Ok : bool; Err : text };
+type TokenBalance = record {
+  balance : text;
+  error : opt text;
+  success : bool;
+  contract_address : text;
+  symbol : text;
+};
+type TransactionType = variant {
+  IcpTransfer : record {
+    to_principal : principal;
+    to_subaccount : opt blob;
+    memo : opt nat64;
+    amount : nat64;
+  };
+  EvmTransfer : record {
+    to : text;
+    value : nat;
+    chain_id : nat64;
+    gas_limit : nat64;
+    gas_price : nat;
+  };
+};
+type TransferEvmArgs = record {
+  to : text;
+  value : nat;
+  chain_id : nat64;
+  gas_limit : nat64;
+  wallet_id : text;
+  gas_price : nat;
+};
 type Wallet = record {
   threshold : nat8;
   metadata : vec record { blob; text };
@@ -51,7 +104,7 @@ service : (text) -> {
   // # Returns
   // 
   // * `bool` - True if the message can be signed, otherwise false.
-  can_sign : (text, text) -> (bool) query;
+  can_sign : (text, text) -> (bool);
   // Creates a new wallet.
   // 
   // # Arguments
@@ -64,6 +117,8 @@ service : (text) -> {
   // 
   // * `Result<(), String>` - Result indicating success or an error message.
   create_wallet : (text, vec principal, nat8) -> (Result);
+  get_evm_address : (text) -> (Result_1);
+  get_icp_balance : (text) -> (Result_3);
   // Retrieves all messages that can be signed for a given wallet.
   // 
   // # Arguments
@@ -73,7 +128,7 @@ service : (text) -> {
   // # Returns
   // 
   // * `Vec<Vec<u8>>` - A list of messages that can be signed.
-  get_messages_to_sign : (text) -> (Result_3);
+  get_messages_to_sign : (text) -> (Result_4);
   // Retrieves all messages that have been proposed along with their signers for a given wallet.
   // 
   // # Arguments
@@ -82,14 +137,14 @@ service : (text) -> {
   // 
   // # Returns
   // 
-  // * `Vec<(Vec<u8>, Vec<Principal>)>` - A list of tuples containing messages and their signers.
-  get_messages_with_signers : (text) -> (Result_4) query;
+  // * `Vec<(Vec<u8>, Vec<String>)>` - A list of tuples containing messages and their signers (hex-string).
+  get_messages_with_signers : (text) -> (Result_5);
   // Get the metadata associated with a message in the wallet.
   // 
   // * `message` - The message as a `Vec<u8>`.
   // 
   // Returns `Option<&String>` containing the metadata if it exists.
-  get_metadata : (text, text) -> (Result_1) query;
+  get_metadata : (text, text) -> (Result_1);
   // Retrieves all messages that have been proposed for a given wallet.
   // 
   // # Arguments
@@ -99,7 +154,8 @@ service : (text) -> {
   // # Returns
   // 
   // * `Vec<Vec<u8>>` - A list of messages that have been proposed.
-  get_proposed_messages : (text) -> (Result_3) query;
+  get_proposed_messages : (text) -> (Result_4);
+  get_transaction_count : (text, nat64) -> (Result_6);
   // Retrieves a wallet by its ID.
   // 
   // # Arguments
@@ -110,6 +166,7 @@ service : (text) -> {
   // 
   // * `Option<Wallet>` - The wallet if found, otherwise None.
   get_wallet : (text) -> (opt Wallet);
+  get_wallet_portfolio : (text, nat64) -> (Result_7);
   // Retrieves all wallets associated with a given principal.
   // 
   // # Arguments
@@ -118,7 +175,7 @@ service : (text) -> {
   // 
   // # Returns
   // 
-  // * `Vec<String>` - A list of wallet IDs associated with the principal.
+  // * `HashSet<String>` - A list of wallet IDs associated with the principal.
   get_wallets_for_principal : (principal) -> (vec text) query;
   // Proposes a message to be signed by the wallet.
   // 
@@ -131,6 +188,7 @@ service : (text) -> {
   // 
   // * `Result<(), String>` - Result indicating success or an error message.
   propose : (text, text) -> (Result);
+  propose_batch_transaction : (text, BatchTransaction) -> (Result_1);
   // Proposes a message and adds metadata in one call.
   // 
   // # Arguments
@@ -177,6 +235,7 @@ service : (text) -> {
   // * `Result<String, String>` - The signature in hexadecimal format or an error message.
   sign : (text, text) -> (Result_1);
   transfer : (text, nat64, principal) -> (Result_1);
+  transfer_evm : (TransferEvmArgs) -> (Result_1);
   // Verifies a signature for a given message and wallet.
   // 
   // # Arguments
@@ -188,5 +247,5 @@ service : (text) -> {
   // # Returns
   // 
   // * `Result<bool, String>` - True if the signature is valid, otherwise an error message.
-  verify_signature : (text, text, text) -> (Result_5);
+  verify_signature : (text, text, text) -> (Result_8);
 }
