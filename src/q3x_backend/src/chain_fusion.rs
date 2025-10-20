@@ -5,13 +5,10 @@ use candid::{CandidType, Principal};
 use crc32fast::Hasher as Crc32Hasher;
 use ethereum_tx_sign::{EcdsaSig, LegacyTransaction, Transaction};
 use hex;
-use ic_cdk::api::canister_self;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha224};
 use tiny_keccak::{Hasher, Keccak};
-
-// use declarations::evm_rpc::{RpcError, RpcService, evm_rpc};
 
 use crate::ecdsa::{get_ecdsa_key_id_from_env, get_public_key, sign_message};
 
@@ -164,14 +161,7 @@ pub async fn send_transaction(raw_tx: Vec<u8>, chain_id: u64) -> Result<String, 
     let hex_raw = format!("0x{}", hex::encode(&raw_tx));
 
     // Use proper types
-    let rpc_services = match chain_id {
-        1 => RpcServices::EthMainnet(Some(vec![EthMainnetService::PublicNode])),
-        11155111 => RpcServices::EthSepolia(Some(vec![EthSepoliaService::PublicNode])),
-        42161 => RpcServices::ArbitrumOne(Some(vec![L2MainnetService::PublicNode])),
-        8453 => RpcServices::BaseMainnet(Some(vec![L2MainnetService::PublicNode])),
-        10 => RpcServices::OptimismMainnet(Some(vec![L2MainnetService::PublicNode])),
-        _ => return Err(format!("Unsupported chain_id: {}", chain_id)),
-    };
+    let rpc_services = get_rpc_services(chain_id)?;
 
     let rpc_config = Some(RpcConfig {
         response_size_estimate: Some(1000),
@@ -241,16 +231,24 @@ pub async fn get_transaction_count(wallet_id: String, chain_id: u64) -> Result<u
     let address = get_evm_address(wallet_id).await?;
 
     // Determine RPC services based on chain_id
-    let rpc_services = match chain_id {
-        1 => RpcServices::EthMainnet(Some(vec![EthMainnetService::PublicNode])),
-        11155111 => RpcServices::EthSepolia(Some(vec![EthSepoliaService::PublicNode])),
-        42161 => RpcServices::ArbitrumOne(Some(vec![L2MainnetService::PublicNode])),
-        _ => return Err(format!("Unsupported chain_id: {}", chain_id)),
-    };
+    let rpc_services = get_rpc_services(chain_id)?;
+    // let rpc_services = match chain_id {
+    //     1 => RpcServices::EthMainnet(Some(vec![EthMainnetService::PublicNode])),
+    //     11155111 => RpcServices::EthSepolia(Some(vec![EthSepoliaService::PublicNode])),
+    //     42161 => RpcServices::ArbitrumOne(Some(vec![L2MainnetService::PublicNode])),
+    //     421614 => RpcServices::Custom {
+    //         chain_id: 421614,
+    //         services: vec![RpcApi {
+    //             url: "https://sepolia-rollup.arbitrum.io/rpc".to_string(),
+    //             headers: None,
+    //         }],
+    //     },
+    //     _ => return Err(format!("Unsupported chain_id: {}", chain_id)),
+    // };
 
     // RPC config
     let rpc_config = Some(RpcConfig {
-        response_size_estimate: Some(1000),
+        response_size_estimate: Some(1000u64),
         response_consensus: None,
     });
 
@@ -265,6 +263,10 @@ pub async fn get_transaction_count(wallet_id: String, chain_id: u64) -> Result<u
         Principal::from_text(EVM_CANISTER_ID).map_err(|e| format!("Invalid canister ID: {}", e))?;
 
     ic_cdk::println!("Getting transaction count for address: {}", args.address);
+    ic_cdk::println!(
+        "Getting transaction count for address 111: {}",
+        args.address
+    );
 
     // Call eth_getTransactionCount
     let (response,): (MultiGetTransactionCountResult,) = ic_cdk::api::call::call_with_payment(
@@ -275,6 +277,8 @@ pub async fn get_transaction_count(wallet_id: String, chain_id: u64) -> Result<u
     )
     .await
     .map_err(|e| format!("RPC call failed: {:?}", e))?;
+
+    ic_cdk::println!("Received transaction count response");
 
     // Handle response
     match response {
@@ -409,13 +413,33 @@ fn get_rpc_service(chain_id: u64) -> Result<RpcService, String> {
         1 => Ok(RpcService::EthMainnet(EthMainnetService::PublicNode)),
         11155111 => Ok(RpcService::EthSepolia(EthSepoliaService::PublicNode)),
         42161 => Ok(RpcService::ArbitrumOne(L2MainnetService::PublicNode)),
-        421614 => Ok(RpcService::Custom {
-            0: RpcApi {
+        421614 => Ok(RpcService::Custom(RpcApi {
+            url: "https://sepolia-rollup.arbitrum.io/rpc".to_string(),
+            headers: None,
+        })),
+        _ => Err(format!("Unsupported chain: {}", chain_id)),
+    }
+}
+
+fn get_rpc_services(chain_id: u64) -> Result<RpcServices, String> {
+    match chain_id {
+        1 => Ok(RpcServices::EthMainnet(Some(vec![
+            EthMainnetService::PublicNode,
+        ]))),
+        11155111 => Ok(RpcServices::EthSepolia(Some(vec![
+            EthSepoliaService::PublicNode,
+        ]))),
+        42161 => Ok(RpcServices::ArbitrumOne(Some(vec![
+            L2MainnetService::PublicNode,
+        ]))),
+        421614 => Ok(RpcServices::Custom {
+            chain_id,
+            services: vec![RpcApi {
                 url: "https://sepolia-rollup.arbitrum.io/rpc".to_string(),
                 headers: None,
-            },
+            }],
         }),
-        _ => Err(format!("Unsupported chain: {}", chain_id)),
+        _ => Err(format!("Unsupported chain_id: {}", chain_id)),
     }
 }
 
