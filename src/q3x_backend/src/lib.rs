@@ -58,11 +58,13 @@ fn init(env: String) {
     KEY_ID.with(|key_id| {
         key_id
             .borrow_mut()
-            .clone_from(&get_ecdsa_key_id_from_env(&env));
+            // .clone_from(&get_ecdsa_key_id_from_env(&env)); THIS LINE USE FOR DEPLOY FROM DFX
+            .clone_from(&get_ecdsa_key_id_from_env("test"));
     });
 
     // Initialize VetKD key for encryption/decryption
-    set_vetkey_id(&env);
+    // set_vetkey_id(&env);
+    set_vetkey_id("test");
 }
 
 /// Creates a new wallet.

@@ -128,7 +128,7 @@ pub async fn create_signed_transaction(
     let digest = tx.hash();
 
     // Sign with threshold ECDSA
-    let key_id = get_ecdsa_key_id_from_env("");
+    let key_id = get_ecdsa_key_id_from_env("test");
     ic_cdk::println!("Using key: {}", key_id.name);
     let signature = sign_message(args.wallet_id.clone(), digest.to_vec(), key_id).await?;
 
@@ -298,7 +298,7 @@ pub async fn get_transaction_count(wallet_id: String, chain_id: u64) -> Result<u
 
 /// Get EVM address for a wallet
 pub async fn get_evm_address(wallet_id: String) -> Result<String, String> {
-    let key_id = get_ecdsa_key_id_from_env("");
+    let key_id = get_ecdsa_key_id_from_env("test");
     let public_key = get_public_key(wallet_id, key_id).await?;
 
     let address = derive_evm_address(public_key);
